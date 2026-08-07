@@ -44,15 +44,20 @@ def main():
         n_clusters = max(n_clusters, d["cluster"] + 1)
     print(f"文档聚类: {len(clusters)} 篇, {n_clusters} 类")
 
-    # 3. 向量化文本块（若已有缓存则直接加载，避免重复耗时）
+    # 3. 向量化文本块（若缓存块数与当前一致则复用，避免重复耗时；不一致说明有增量数据，需重算）
     from src.embed.embed import embed_texts
     chunk_vec_file = OUT_DIR / "chunk_vectors.npy"
     if chunk_vec_file.exists():
-        chunk_vecs = np.load(chunk_vec_file)
-        print(f"加载缓存文本块向量: {chunk_vecs.shape}")
+        cached = np.load(chunk_vec_file)
+        if cached.shape[0] == len(chunks):
+            chunk_vecs = cached
+            print(f"加载缓存文本块向量: {chunk_vecs.shape}")
+        else:
+            print(f"缓存块数不匹配（缓存 {cached.shape[0]} vs 当前 {len(chunks)}），重新向量化")
+            chunk_vecs = embed_texts([c["text"] for c in chunks])
+            print(f"文本块向量: {chunk_vecs.shape}")
     else:
-        texts = [c["text"] for c in chunks]
-        chunk_vecs = embed_texts(texts)
+        chunk_vecs = embed_texts([c["text"] for c in chunks])
         print(f"文本块向量: {chunk_vecs.shape}")
 
     # 4. 文档代表向量：使用 LLM 摘要向量（比块均值更能代表文档主题）
