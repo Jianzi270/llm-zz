@@ -154,4 +154,15 @@ python scripts/export_dify_dataset.py                 # 导出 Dify 兼容数据
 python scripts/export_dify_dataset.py --format chunks # 导出文本块备份（data/export/chunks_backup.jsonl）
 ```
 
+一键爬取 + 清洗（手动执行，不自动调度、不执行 git 操作）：
+
+```bash
+python scripts/auto_update.py                # 一键：增量爬取 + 清洗 + 审核摘要
+python scripts/auto_update.py --dry-run      # 仅预览候选，不下载不清洗
+python scripts/auto_update.py --skip-crawl   # 跳过爬取，仅清洗新增文件
+# 也可作为代码接口调用：from scripts.auto_update import run_pipeline; run_pipeline()
+```
+
+> 运行后输出新增文件与残缺文件提醒，由人工审核后再手动 `git add/commit/push`，脚本不会自动推送。
+
 > 若日后有 Dify 平台环境，可将 `data/export/dify_dataset.jsonl` 导入 Dify 数据集，并使用 `dify/Rag.yml` 作为平台侧应用（备选方案）。
