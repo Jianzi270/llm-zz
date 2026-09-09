@@ -17,6 +17,7 @@
   .src { background: #f0f4f9; border-radius: 6px; padding: 6px 10px; margin: 4px 0; font-size: 12px; color: #456; }
   .err { color: #c0392b; }
   #inputbar { display: flex; gap: 10px; padding: 14px 20px; background: #fff; border-top: 1px solid #e3e8ef; }
+  #mode { padding: 10px; border: 1px solid #cfd6e0; border-radius: 8px; background: #fff; }
   #input { flex: 1; padding: 10px 14px; border: 1px solid #cfd6e0; border-radius: 8px; font-size: 14px; outline: none; }
   #input:focus { border-color: #1f3a5f; }
   #send { padding: 10px 26px; background: #1f3a5f; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
@@ -31,6 +32,12 @@
   <div class="tip">可咨询：如"深圳2025年GDP增长目标是多少？"、"罗湖区城市更新成效"、"广东省2024年城镇新增就业目标"</div>
 </div>
 <div id="inputbar">
+  <select id="mode" aria-label="任务模式">
+    <option value="qa">政策问答</option>
+    <option value="summary">材料摘要</option>
+    <option value="report">报告草稿</option>
+    <option value="briefing">情报简报</option>
+  </select>
   <input id="input" placeholder="请输入你的问题..." autocomplete="off">
   <button id="send">发送</button>
 </div>
@@ -38,6 +45,7 @@
 const chat = document.getElementById('chat');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const mode = document.getElementById('mode');
 
 function addMsg(text, cls) {
   const div = document.createElement('div');
@@ -59,7 +67,7 @@ async function ask() {
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question: q})
+      body: JSON.stringify({question: q, mode: mode.value})
     });
     const data = await resp.json();
     loading.remove();
@@ -70,12 +78,16 @@ async function ask() {
     const bot = addMsg(data.answer, 'bot');
     const meta = document.createElement('div');
     meta.className = 'meta';
-    meta.innerHTML = '增强查询：' + (data.enhanced || '—') + '<br>来源：';
+    meta.textContent = '增强查询：' + (data.enhanced || '—') + '｜任务：' + (data.mode || 'qa');
+    meta.appendChild(document.createElement('br'));
+    meta.appendChild(document.createTextNode('来源：'));
     bot.appendChild(meta);
     (data.sources || []).forEach(s => {
       const d = document.createElement('div');
       d.className = 'src';
-      d.textContent = '📄 ' + s.doc_id + '（相似度 ' + s.score + '）';
+      const evidence = s.evidence_chunks > 1 ? '，证据块 ' + s.evidence_chunks : '';
+      d.textContent = '📄 ' + (s.doc_title || s.doc_id) + '（' + (s.region || '未知地区') + '，'
+        + (s.year || '未知年份') + '，相似度 ' + s.score + evidence + '）';
       meta.appendChild(d);
     });
   } catch (e) {

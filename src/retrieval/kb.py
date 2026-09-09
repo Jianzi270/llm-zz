@@ -11,6 +11,7 @@
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -25,18 +26,73 @@ def load_kb() -> dict:
     """加载知识库（向量 + 三级索引 + 嵌入模型），懒加载。"""
     global _kb
     if _kb is None:
-        _kb = {
+        loaded = {
             "chunk_vectors": np.load(KB_DIR / "chunk_vectors.npy"),
             "doc_vectors": np.load(KB_DIR / "doc_vectors.npy"),
             "category_vectors": np.load(KB_DIR / "category_vectors.npy"),
             "index": json.loads((KB_DIR / "index.json").read_text(encoding="utf-8")),
         }
+        idx = loaded["index"]
+        expected = (len(idx.get("chunks", [])), len(idx.get("doc_ids", [])))
+        actual = (loaded["chunk_vectors"].shape[0], loaded["doc_vectors"].shape[0])
+        if actual != expected:
+            raise RuntimeError(f"知识库索引与向量数量不一致: index={expected}, vectors={actual}")
+        _kb = loaded
     return _kb
 
 
 def _topk(scores: np.ndarray, k: int) -> list[tuple[int, float]]:
     idx = np.argsort(-scores)[:k]
     return [(int(i), float(scores[i])) for i in idx]
+
+
+def _select_diverse_chunks(chunk_scores: list[tuple[int, float]], chunks: list[dict],
+                           top_k: int, max_per_doc: int = 2) -> list[tuple[int, float]]:
+    """按分数选择文本块，并限制单个文档垄断全部上下文。"""
+    selected = []
+    doc_counts: dict[str, int] = {}
+    for item in sorted(chunk_scores, key=lambda value: value[1], reverse=True):
+        doc_id = chunks[item[0]]["doc_id"]
+        if doc_counts.get(doc_id, 0) >= max_per_doc:
+            continue
+        selected.append(item)
+        doc_counts[doc_id] = doc_counts.get(doc_id, 0) + 1
+        if len(selected) >= top_k:
+            break
+    return selected
+
+
+REGION_ALIASES = {
+    "国务院": "全国", "全国": "全国", "广东": "广东省", "深圳": "深圳市",
+    "南山": "南山区", "福田": "福田区", "罗湖": "罗湖区", "龙岗": "龙岗区",
+    "宝安": "宝安区", "龙华": "龙华区", "光明": "光明区", "坪山": "坪山区",
+    "盐田": "盐田区", "大鹏": "大鹏新区", "深汕": "深汕特别合作区",
+}
+
+
+def extract_metadata_filters(query: str) -> dict[str, str]:
+    """从查询中提取确定性较高的年份和地区约束。"""
+    year = re.search(r"(?:19|20)\d{2}", query)
+    region = ""
+    # 先匹配区级，避免“深圳市南山区”被提前识别为市级。
+    for alias in sorted(REGION_ALIASES, key=len, reverse=True):
+        if alias in query:
+            region = REGION_ALIASES[alias]
+            if region not in {"深圳市", "广东省", "全国"}:
+                break
+    return {"year": year.group(0) if year else "", "region": region}
+
+
+def _filter_doc_ids(doc_ids: set[str], index: dict, filters: dict[str, str]) -> set[str]:
+    metadata = index.get("doc_metadata", {})
+    if not metadata or not any(filters.values()):
+        return doc_ids
+    matched = {
+        doc for doc in doc_ids
+        if (not filters["year"] or str(metadata.get(doc, {}).get("year", "")) == filters["year"])
+        and (not filters["region"] or metadata.get(doc, {}).get("region", "") == filters["region"])
+    }
+    return matched
 
 
 def retrieve(query: str, top_c: int = 2, top_d: int = 3, top_k: int = 3) -> list[dict]:
@@ -56,7 +112,14 @@ def retrieve(query: str, top_c: int = 2, top_d: int = 3, top_k: int = 3) -> list
     cand_docs = set()
     for cid, _ in cat_hits:
         cand_docs.update(idx["cluster_docs"][str(cid)])
-    doc_scores = {d: float(doc_vecs[idx["doc_ids"].index(d)] @ q) for d in cand_docs}
+    filters = extract_metadata_filters(query)
+    filtered = _filter_doc_ids(cand_docs, idx, filters)
+    # 若类别路由漏掉了精确年份/地区文档，则扩大到全库的元数据匹配结果。
+    if any(filters.values()) and not filtered:
+        filtered = _filter_doc_ids(set(idx["doc_ids"]), idx, filters)
+    cand_docs = filtered or cand_docs
+    doc_positions = {doc: i for i, doc in enumerate(idx["doc_ids"])}
+    doc_scores = {d: float(doc_vecs[doc_positions[d]] @ q) for d in cand_docs}
     doc_hits = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[:top_d]
 
     # 3. 文本块级检索：在选中文档内
@@ -64,7 +127,7 @@ def retrieve(query: str, top_c: int = 2, top_d: int = 3, top_k: int = 3) -> list
     if not cand_chunks:
         return []
     chunk_scores = [(i, float(chunk_vecs[i] @ q)) for i, _ in cand_chunks]
-    chunk_hits = sorted(chunk_scores, key=lambda x: x[1], reverse=True)[:top_k]
+    chunk_hits = _select_diverse_chunks(chunk_scores, idx["chunks"], top_k)
 
     results = []
     doc_cluster = idx["doc_cluster"]
@@ -76,6 +139,10 @@ def retrieve(query: str, top_c: int = 2, top_d: int = 3, top_k: int = 3) -> list
             "cluster": doc_cluster.get(c["doc_id"]),
             "score": round(score, 4),
             "text": c["text"],
+            "doc_title": c.get("doc_title", c["doc_id"]),
+            "source_level": c.get("source_level", ""),
+            "region": c.get("region", ""),
+            "year": c.get("year", ""),
         })
     return results
 

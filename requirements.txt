@@ -6,3 +6,4 @@ numpy>=1.26
 sentence-transformers>=3.0
 torch>=2.2
 flask>=3.0
+waitress>=3.0

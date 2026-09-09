@@ -45,6 +45,10 @@ def split_long_paragraph(par: str, max_chars: int) -> list[str]:
     sentences = [s.strip() for s in SENTENCE_END.findall(par) if s.strip()]
     if not sentences:
         sentences = [par[i : i + max_chars] for i in range(0, len(par), max_chars)]
+    else:
+        sentences = [piece for sent in sentences
+                     for piece in ([sent] if len(sent) <= max_chars else
+                                   [sent[i:i + max_chars] for i in range(0, len(sent), max_chars)])]
     chunks, buf = [], ""
     for sent in sentences:
         if buf and len(buf) + len(sent) > max_chars:
@@ -69,7 +73,7 @@ def split_document(doc_id: str, text: str, meta: dict, max_chars: int, min_chars
             continue
         # 先合并挂起的短段落
         if pending_short:
-            if chunks:
+            if chunks and len(chunks[-1]["text"]) + len(pending_short) <= max_chars:
                 chunks[-1]["text"] += pending_short
             else:
                 par = pending_short + par
@@ -88,8 +92,19 @@ def split_document(doc_id: str, text: str, meta: dict, max_chars: int, min_chars
                 "text": part,
             }
             chunks.append(chunk)
-    if pending_short and chunks:
-        chunks[-1]["text"] += pending_short
+    if pending_short:
+        if chunks and len(chunks[-1]["text"]) + len(pending_short) <= max_chars:
+            chunks[-1]["text"] += pending_short
+        else:
+            for part in split_long_paragraph(pending_short, max_chars):
+                chunks.append({
+                    "doc_id": doc_id,
+                    "doc_title": meta.get("title", ""),
+                    "source_level": meta.get("source_level", ""),
+                    "region": meta.get("region", ""),
+                    "year": meta.get("report_year", ""),
+                    "text": part,
+                })
     # 附加全局块编号
     for i, c in enumerate(chunks):
         c["chunk_id"] = f"{Path(doc_id).stem}_{i}"

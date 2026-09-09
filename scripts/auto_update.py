@@ -245,7 +245,9 @@ def run_pipeline(dry_run: bool = False, skip_crawl: bool = False, skip_kb: bool 
             print(f"[{name}] 步骤失败，已中止。")
             return 1
 
-    verify_kb(new_docs)
+    if not verify_kb(new_docs):
+        print("知识库验证失败，流水线返回失败状态。")
+        return 1
 
     print("\n" + "=" * 66)
     print("本流水线未执行任何 git 操作。请人工审核后手动提交：")

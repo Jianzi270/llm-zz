@@ -11,6 +11,18 @@
       "content_selector": ".news_cont_d_wrap",
       "link_pattern": "/zfgb/",
       "title_prefix": "深圳市政府工作报告"
+    },
+    {
+      "name": "深汕特别合作区法治政府建设报告",
+      "content_selector": ".news_cont_d_wrap",
+      "documents": [
+        {
+          "title": "深圳市深汕特别合作区党政办公室关于2025年法治政府建设情况的报告",
+          "year": "2025",
+          "filename": "深圳市深汕特别合作区党政办公室关于2025年法治政府建设情况的报告_2025.txt",
+          "url": "https://www.sz.gov.cn/cn/xxgk/fzzfjsndbg/sstbhzq/content/post_12612595.html"
+        }
+      ]
     }
   ],
   "output_dir": "data/raw/crawled"

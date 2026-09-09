@@ -10,7 +10,9 @@
   python -m src.security.compliance --check "测试文本"
 """
 import argparse
+import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -55,6 +57,13 @@ def audit_log(entry: dict) -> None:
     """追加一条审计记录。entry 中的 ts 缺省取当前时间。"""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     record = dict(entry)
+    # 默认只保存问题指纹和长度；确有合规需要时可显式开启原文审计。
+    if os.getenv("AUDIT_STORE_RAW_QUESTION", "0") != "1":
+        for field in ("question", "enhanced", "answer_excerpt"):
+            value = record.pop(field, None)
+            if value:
+                record[f"{field}_sha256"] = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+                record[f"{field}_chars"] = len(str(value))
     record.setdefault("ts", time.strftime("%Y-%m-%d %H:%M:%S"))
     with AUDIT_FILE.open("a", encoding="utf-8", newline="\n") as fp:
         fp.write(json.dumps(record, ensure_ascii=False) + "\n")

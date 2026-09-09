@@ -14,13 +14,12 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.retrieval.kb import load_kb, _topk  # noqa: E402
+from src.retrieval.kb import load_kb, _topk, retrieve  # noqa: E402
 
 ENHANCE_PROMPT = (
     "你是政务信息检索助手。用户输入一个查询，请将其改写为更适合语义检索的形式，要求：\n"
@@ -65,25 +64,7 @@ def enhance_query(question: str) -> str:
 
 def dc_rag_retrieve(question: str, top_c: int = 2, top_d: int = 3, top_k: int = 3) -> list[dict]:
     """C2：DC-RAG 三级检索（增强后查询）。"""
-    from src.embed.embed import embed_queries
-    kb = load_kb()
-    q = embed_queries([question])[0]
-    idx = kb["index"]
-    cat_vecs, doc_vecs, chunk_vecs = kb["category_vectors"], kb["doc_vectors"], kb["chunk_vectors"]
-
-    cat_hits = _topk(cat_vecs @ q, top_c)
-    cand_docs = set()
-    for cid, _ in cat_hits:
-        cand_docs.update(idx["cluster_docs"][str(cid)])
-    doc_scores = {d: float(doc_vecs[idx["doc_ids"].index(d)] @ q) for d in cand_docs}
-    doc_hits = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[:top_d]
-
-    cand_chunks = [(i, c) for i, c in enumerate(idx["chunks"]) if c["doc_id"] in dict(doc_hits)]
-    if not cand_chunks:
-        return []
-    chunk_scores = sorted(((i, float(chunk_vecs[i] @ q)) for i, _ in cand_chunks), key=lambda x: x[1], reverse=True)[:top_k]
-    return [{"chunk_id": idx["chunks"][i]["chunk_id"], "doc_id": idx["chunks"][i]["doc_id"],
-             "score": round(s, 4), "text": idx["chunks"][i]["text"]} for i, s in chunk_scores]
+    return retrieve(question, top_c, top_d, top_k)
 
 
 def flat_retrieve(question: str, top_k: int = 3) -> list[dict]:

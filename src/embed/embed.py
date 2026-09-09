@@ -46,8 +46,22 @@ def load_model():
         cfg = load_config()
         cache = PROJECT_ROOT / cfg["cache_dir"]
         cache.mkdir(parents=True, exist_ok=True)
-        print(f"加载模型 {cfg['model_name']}（缓存 {cache}）...")
-        _model = SentenceTransformer(cfg["model_name"], device=cfg["device"], cache_folder=str(cache))
+        model_cache_name = "models--" + cfg["model_name"].replace("/", "--")
+        snapshots_dir = cache / model_cache_name / "snapshots"
+        local_snapshots = sorted(
+            (p for p in snapshots_dir.glob("*") if (p / "config.json").exists()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ) if snapshots_dir.exists() else []
+        model_source = str(local_snapshots[0]) if local_snapshots else cfg["model_name"]
+        offline = bool(local_snapshots)
+        print(f"加载模型 {cfg['model_name']}（{'本地离线缓存' if offline else '首次下载'}: {model_source}）...")
+        _model = SentenceTransformer(
+            model_source,
+            device=cfg["device"],
+            cache_folder=str(cache),
+            local_files_only=offline,
+        )
     return _model
 
 
@@ -90,7 +104,7 @@ def main():
         sim_diff = cos[0][2]
         print(f"示例相似度: [0,1]={sim_same:.3f}, [0,2]={sim_diff:.3f}")
         if sim_same > sim_diff:
-            print("相似度自检通过 ✓")
+            print("相似度自检通过 [PASS]")
         else:
             print("相似度自检未通过（结果可接受，仅提示）")
         return

@@ -25,5 +25,6 @@ _pdf_extract.txt
 models/
 data/vectors/
 data/knowledge_base/
+data/logs/*.jsonl
 *.npy
 *.npz

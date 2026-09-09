@@ -21,7 +21,16 @@ EVAL_FILE = PROJECT_ROOT / "data" / "eval" / "eval_questions.jsonl"
 OUT_FILE = PROJECT_ROOT / "data" / "eval" / "eval_results.jsonl"
 
 
-def dc_rag_top_docs(question_vec, kb, top_c, top_d) -> list[str]:
+def _apply_query_filters(question: str, candidates: set[str], idx: dict) -> set[str]:
+    from src.retrieval.kb import _filter_doc_ids, extract_metadata_filters
+    filters = extract_metadata_filters(question)
+    filtered = _filter_doc_ids(candidates, idx, filters)
+    if any(filters.values()) and not filtered:
+        filtered = _filter_doc_ids(set(idx["doc_ids"]), idx, filters)
+    return filtered or candidates
+
+
+def dc_rag_top_docs(question: str, question_vec, kb, top_c, top_d) -> list[str]:
     """DC-RAG：类别 → 文档 两级筛选后的候选文档。"""
     idx = kb["index"]
     cat_scores = kb["category_vectors"] @ question_vec
@@ -29,6 +38,7 @@ def dc_rag_top_docs(question_vec, kb, top_c, top_d) -> list[str]:
     cand_docs = set()
     for cid in cat_hits:
         cand_docs.update(idx["cluster_docs"][str(cid)])
+    cand_docs = _apply_query_filters(question, cand_docs, idx)
     doc_scores = {d: float(kb["doc_vectors"][idx["doc_ids"].index(d)] @ question_vec) for d in cand_docs}
     return [d for d, _ in sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[:top_d]]
 
@@ -41,7 +51,7 @@ def flat_top_docs(question_vec, kb, top_d) -> list[str]:
     return [idx["doc_ids"][i] for i in order]
 
 
-def dc_rag_chunks(question_vec, kb, top_c, top_d, top_k) -> list[dict]:
+def dc_rag_chunks(question: str, question_vec, kb, top_c, top_d, top_k) -> list[dict]:
     """DC-RAG 块级：类别 → 文档 → 文本块 三级检索返回文本块。"""
     idx = kb["index"]
     cat_scores = kb["category_vectors"] @ question_vec
@@ -49,11 +59,14 @@ def dc_rag_chunks(question_vec, kb, top_c, top_d, top_k) -> list[dict]:
     cand_docs = set()
     for cid in cat_hits:
         cand_docs.update(idx["cluster_docs"][str(cid)])
+    cand_docs = _apply_query_filters(question, cand_docs, idx)
     doc_scores = {d: float(kb["doc_vectors"][idx["doc_ids"].index(d)] @ question_vec) for d in cand_docs}
     doc_hits = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[:top_d]
     cand_chunks = [(i, c) for i, c in enumerate(idx["chunks"]) if c["doc_id"] in dict(doc_hits)]
-    scores = sorted(((i, float(kb["chunk_vectors"][i] @ question_vec)) for i, _ in cand_chunks),
-                    key=lambda x: x[1], reverse=True)[:top_k]
+    from src.retrieval.kb import _select_diverse_chunks
+    scores = _select_diverse_chunks(
+        [(i, float(kb["chunk_vectors"][i] @ question_vec)) for i, _ in cand_chunks],
+        idx["chunks"], top_k)
     return [idx["chunks"][i] for i, _ in scores]
 
 
@@ -85,9 +98,9 @@ def main():
     mrr_dc = mrr_flat = 0.0
     n_dc_chunk = n_flat_chunk = 0
     for q, qv in zip(questions, qvecs):
-        dc_docs = dc_rag_top_docs(qv, kb, args.top_c, args.top_d)
+        dc_docs = dc_rag_top_docs(q["question"], qv, kb, args.top_c, args.top_d)
         flat_docs = flat_top_docs(qv, kb, args.top_d)
-        dc_chunks = dc_rag_chunks(qv, kb, args.top_c, args.top_d, args.top_k)
+        dc_chunks = dc_rag_chunks(q["question"], qv, kb, args.top_c, args.top_d, args.top_k)
         flat_chunks_ = flat_chunks(qv, kb, args.top_k)
         hit_dc = q["gold_doc_id"] in dc_docs
         hit_flat = q["gold_doc_id"] in flat_docs
@@ -126,14 +139,14 @@ def main():
     print(f"简化RAG 命中: {n_flat_chunk}/{total}（{n_flat_chunk/total*100:.0f}%）")
     diff = n_dc_chunk - n_flat_chunk
     if diff > 0:
-        print(f"结论: DC-RAG 块级命中率优于简化 RAG（+{diff} 题）✓")
+        print(f"结论: DC-RAG 块级命中率优于简化 RAG（+{diff} 题）[PASS]")
     elif diff == 0:
         print("结论: 块级命中率持平")
     else:
         print(f"结论: 简化 RAG 块级更优（-{diff} 题），需检查类别划分")
     for r in results:
-        flag_dc = "✓" if r["dc_rag_hit"] else "✗"
-        flag_flat = "✓" if r["flat_hit"] else "✗"
+        flag_dc = "PASS" if r["dc_rag_hit"] else "FAIL"
+        flag_flat = "PASS" if r["flat_hit"] else "FAIL"
         print(f"  DC-RAG[{flag_dc}] 扁平[{flag_flat}]  {r['question'][:36]}")
     print(f"\n详情输出: {OUT_FILE}")
 
